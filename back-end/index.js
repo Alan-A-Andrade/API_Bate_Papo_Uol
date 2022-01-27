@@ -13,9 +13,6 @@ const app = express();
 app.use(express.json())
 app.use(cors());
 
-const participantsOnline = []
-const chatMessages = []
-
 //mongodb://127.0.0.1:27017/?compressors=disabled&gssapiServiceName=mongodb
 
 
@@ -145,23 +142,43 @@ app.post("/messages", async (req, res) => {
 
 app.get("/messages", async (req, res) => {
 
-  // try {
+  try {
 
-  //   await mongoClient.connect()
-  //   const dbUol = mongoClient.db("bate_papo_uol_alan");
-  //   const messagesCollection = dbUol.collection("messages")
+    await mongoClient.connect()
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const messagesCollection = dbUol.collection("messages")
+    const chatMessages = await messagesCollection.find({}).toArray()
 
-  //   const chatMessages = await participantsCollection.find({}).toArray()
+    let numberMessagesOnChat;
+    let userName = req.header("User")
 
-  //   let participantsList = participantsOnline.map(el => {
-  //     let container = {}
-  //     container.name = el.name
-  //     return container
-  //   })
-  //   res.send(participantsList)
-  // } catch {
-  //   res.sendStatus(500)
-  // }
+    let filteredChat = chatMessages.filter(el => {
+
+      if (el.type === 'message' || el.from === userName || el.to === userName) {
+        return true
+      }
+      else {
+        return false
+      }
+
+    })
+
+    if (req.query.limit) {
+      numberMessagesOnChat = parseInt(req.query.limit);
+    }
+    else {
+      numberMessagesOnChat = filteredChat.length
+    }
+
+    let chatMessagesToUser = filteredChat.reverse().slice(0, numberMessagesOnChat).reverse()
+
+    res.send(chatMessagesToUser)
+  } catch {
+    res.sendStatus(500)
+  }
+
+  mongoClient.close()
+
 
 });
 
