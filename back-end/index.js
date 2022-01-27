@@ -20,6 +20,46 @@ app.get("/hello", (req, res) => {
   res.send("Oi");
 });
 
+
+function removeAwayUsers() {
+  setInterval(async () => {
+    const timeOut = Date.now() - 10000
+    try {
+      await mongoClient.connect()
+      const dbUol = mongoClient.db("bate_papo_uol_alan");
+      const participantsCollection = dbUol.collection("participants")
+      const messagesCollection = dbUol.collection("messages")
+
+      let usersToRemove = []
+      usersToRemove = await participantsCollection.find({ lastStatus: { $lte: timeOut } }).toArray()
+      if (usersToRemove.length === 0) {
+        return
+      }
+      await participantsCollection.deleteMany({ lastStatus: { $lte: timeOut } })
+
+      let msgToChat = usersToRemove.map(el => {
+        let newStatusMsg = {
+          from: el.name,
+          to: 'Todos',
+          text: 'sai da sala...',
+          type: 'status',
+          time: dayjs().format('HH:mm:ss')
+        }
+        return newStatusMsg
+      })
+
+      await messagesCollection.insertMany([...msgToChat])
+
+    } catch (erro) {
+      console.log(erro)
+    }
+    mongoClient.close()
+
+  }, 15000);
+}
+
+removeAwayUsers();
+
 /* Participants Routs */
 
 app.post("/participants", async (req, res) => {
@@ -79,7 +119,8 @@ app.get("/participants", async (req, res) => {
     const dbUol = mongoClient.db("bate_papo_uol_alan");
     const participantsCollection = dbUol.collection("participants")
 
-    const participantsOnline = await participantsCollection.find({}).toArray()
+    let participantsOnline = []
+    participantsOnline = await participantsCollection.find({}).toArray()
 
     let participantsList = participantsOnline.map(el => {
       let container = {}
@@ -154,7 +195,7 @@ app.get("/messages", async (req, res) => {
 
     let filteredChat = chatMessages.filter(el => {
 
-      if (el.type === 'message' || el.from === userName || el.to === userName) {
+      if (el.type === 'status' || el.type === 'message' || el.from === userName || el.to === userName) {
         return true
       }
       else {
@@ -162,6 +203,7 @@ app.get("/messages", async (req, res) => {
       }
 
     })
+
 
     if (req.query.limit) {
       numberMessagesOnChat = parseInt(req.query.limit);
