@@ -4,6 +4,7 @@ import Joi from 'joi';
 import dayjs from 'dayjs';
 import { MongoClient, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
+import { text } from 'node:stream/consumers';
 dotenv.config();
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
@@ -26,27 +27,27 @@ app.get("/hello", (req, res) => {
 
 app.post("/participants", async (req, res) => {
 
-  const newParticipant = req.body
-
-  const participantsSchema = Joi.object().keys({
-    name: Joi.string()
-  });
-
   try {
-    Joi.attempt(newParticipant, participantsSchema)
+    await mongoClient.connect()
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const participantsCollection = dbUol.collection("participants")
+    const messagesCollection = dbUol.collection("messages")
 
-    if (participantsOnline.find(el => el.name === newParticipant.name)) {
-      res.sendStatus(409)
-      return
-    }
+    const participantsOnline = await participantsCollection.find({}).toArray()
 
-    newParticipant.lastStatus = Date.now()
+    let participantsList = participantsOnline.map(el => el.name)
+
+
+    const newParticipant = req.body
+
+    const participantsSchema = Joi.object().keys({
+      name: Joi.string().invalid(...participantsList).required()
+    });
 
     try {
-      await mongoClient.connect()
-      const dbUol = mongoClient.db("bate_papo_uol_alan");
-      const participantsCollection = dbUol.collection("participants")
-      const messagesCollection = dbUol.collection("messages")
+      Joi.assert(newParticipant, participantsSchema)
+
+      newParticipant.lastStatus = Date.now()
 
       await participantsCollection.insertOne(newParticipant)
 
@@ -57,18 +58,16 @@ app.post("/participants", async (req, res) => {
         type: 'status',
         time: dayjs(newParticipant.lastStatus).format('HH:mm:ss')
       }
-
       await messagesCollection.insertOne(newStatusMsg)
 
       res.sendStatus(201)
 
     } catch {
-      res.sendStatus(500)
+      res.sendStatus(409)
     }
 
-
   } catch {
-    res.sendStatus(422)
+    res.sendStatus(500)
   }
 
   mongoClient.close()
@@ -95,8 +94,75 @@ app.get("/participants", async (req, res) => {
     res.sendStatus(500)
   }
 
+  mongoClient.close()
 });
 
 /* Messages Routs */
+
+app.post("/messages", async (req, res) => {
+  try {
+
+    await mongoClient.connect()
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const participantsCollection = dbUol.collection("participants")
+    const messagesCollection = dbUol.collection("messages")
+
+
+    const participantsOnline = await participantsCollection.find({}).toArray()
+
+    let participantsList = participantsOnline.map(el => el.name)
+
+    let userMsg = { ...req.body, from: req.header('User') }
+
+    const messagesSchema = Joi.object().keys({
+      from: Joi.string().valid(...participantsList).required(),
+      to: Joi.string().required(),
+      text: Joi.string().required(),
+      type: Joi.string().valid('message', 'private_message').required()
+    });
+
+    try {
+
+      Joi.assert(userMsg, messagesSchema)
+
+      userMsg.time = dayjs(Date.now()).format('HH:mm:ss')
+
+      await messagesCollection.insertOne(userMsg)
+
+      res.sendStatus(201)
+
+    } catch {
+      res.sendStatus(422)
+    }
+
+  } catch {
+    res.sendStatus(500);
+  }
+
+  mongoClient.close()
+
+});
+
+app.get("/messages", async (req, res) => {
+
+  // try {
+
+  //   await mongoClient.connect()
+  //   const dbUol = mongoClient.db("bate_papo_uol_alan");
+  //   const messagesCollection = dbUol.collection("messages")
+
+  //   const chatMessages = await participantsCollection.find({}).toArray()
+
+  //   let participantsList = participantsOnline.map(el => {
+  //     let container = {}
+  //     container.name = el.name
+  //     return container
+  //   })
+  //   res.send(participantsList)
+  // } catch {
+  //   res.sendStatus(500)
+  // }
+
+});
 
 app.listen(5000);
