@@ -4,7 +4,8 @@ import Joi from 'joi';
 import dayjs from 'dayjs';
 import { MongoClient, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
-import { text } from 'node:stream/consumers';
+import { stripHtml } from "string-strip-html";
+
 dotenv.config();
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
@@ -12,10 +13,6 @@ const mongoClient = new MongoClient(process.env.MONGO_URI);
 const app = express();
 app.use(express.json())
 app.use(cors());
-
-app.get("/hello", (req, res) => {
-  res.send("Oi");
-});
 
 
 function removeAwayUsers() {
@@ -27,8 +24,8 @@ function removeAwayUsers() {
       const participantsCollection = dbUol.collection("participants")
       const messagesCollection = dbUol.collection("messages")
 
-      let usersToRemove = []
-      usersToRemove = await participantsCollection.find({ lastStatus: { $lte: timeOut } }).toArray()
+
+      let usersToRemove = await participantsCollection.find({ lastStatus: { $lte: timeOut } }).toArray()
       if (usersToRemove.length === 0) {
         return
       }
@@ -78,27 +75,34 @@ app.post("/participants", async (req, res) => {
       name: Joi.string().invalid(...participantsList).required()
     });
 
-    try {
-      Joi.assert(newParticipant, participantsSchema)
+    const validation = participantsSchema.validate(newParticipant, { abortEarly: true })
 
-      newParticipant.lastStatus = Date.now()
-
-      await participantsCollection.insertOne(newParticipant)
-
-      let newStatusMsg = {
-        from: newParticipant.name,
-        to: 'Todos',
-        text: 'entra na sala...',
-        type: 'status',
-        time: dayjs(newParticipant.lastStatus).format('HH:mm:ss')
+    if (validation.error) {
+      if (validation.error.details[0].type === "any.invalid") {
+        res.status(409).send("Nome de usuário já em uso")
       }
-      await messagesCollection.insertOne(newStatusMsg)
-
-      res.sendStatus(201)
-
-    } catch {
-      res.sendStatus(409)
+      else {
+        res.status(422).send("name deve ser strings não vazio")
+      }
+      mongoClient.close()
+      return
     }
+
+    newParticipant.name = stripHtml(newParticipant.name).result.trim()
+    newParticipant.lastStatus = Date.now()
+
+    await participantsCollection.insertOne(newParticipant)
+
+    let newStatusMsg = {
+      from: newParticipant.name,
+      to: 'Todos',
+      text: 'entra na sala...',
+      type: 'status',
+      time: dayjs(newParticipant.lastStatus).format('HH:mm:ss')
+    }
+    await messagesCollection.insertOne(newStatusMsg)
+
+    res.sendStatus(201)
 
   } catch {
     res.sendStatus(500)
@@ -119,12 +123,7 @@ app.get("/participants", async (req, res) => {
     let participantsOnline = []
     participantsOnline = await participantsCollection.find({}).toArray()
 
-    let participantsList = participantsOnline.map(el => {
-      let container = {}
-      container.name = el.name
-      return container
-    })
-    res.send(participantsList)
+    res.send(participantsOnline)
   } catch {
     res.sendStatus(500)
   }
@@ -147,7 +146,7 @@ app.post("/messages", async (req, res) => {
 
     let participantsList = participantsOnline.map(el => el.name)
 
-    let userMsg = { ...req.body, from: req.header('User') }
+    let userMsg = { from: req.header('User'), ...req.body }
 
     const messagesSchema = Joi.object().keys({
       from: Joi.string().valid(...participantsList).required(),
@@ -156,19 +155,24 @@ app.post("/messages", async (req, res) => {
       type: Joi.string().valid('message', 'private_message').required()
     });
 
-    try {
 
-      Joi.assert(userMsg, messagesSchema)
+    const validation = messagesSchema.validate(userMsg, { abortEarly: true })
 
-      userMsg.time = dayjs(Date.now()).format('HH:mm:ss')
-
-      await messagesCollection.insertOne(userMsg)
-
-      res.sendStatus(201)
-
-    } catch {
-      res.sendStatus(422)
+    if (validation.error) {
+      res.status(422).send(validation.error.details)
+      mongoClient.close()
+      return
     }
+
+    userMsg.from = stripHtml(userMsg.from).result.trim()
+    userMsg.to = stripHtml(userMsg.to).result.trim()
+    userMsg.text = stripHtml(userMsg.text).result.trim()
+    userMsg.type = stripHtml(userMsg.type).result.trim()
+    userMsg.time = dayjs(Date.now()).format('HH:mm:ss')
+
+    await messagesCollection.insertOne(userMsg)
+
+    res.sendStatus(201)
 
   } catch {
     res.sendStatus(500);
@@ -209,7 +213,7 @@ app.get("/messages", async (req, res) => {
       numberMessagesOnChat = filteredChat.length
     }
 
-    let chatMessagesToUser = filteredChat.reverse().slice(0, numberMessagesOnChat).reverse()
+    let chatMessagesToUser = filteredChat.slice(-numberMessagesOnChat)
 
     res.send(chatMessagesToUser)
   } catch {
@@ -218,6 +222,104 @@ app.get("/messages", async (req, res) => {
 
   mongoClient.close()
 
+
+});
+
+
+app.delete('/messages/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await mongoClient.connect();
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const messagesCollection = dbUol.collection("messages")
+    const messageToDelete = await messagesCollection.findOne({ _id: new ObjectId(id) })
+
+    if (!messageToDelete) {
+      res.sendStatus(404)
+      mongoClient.close()
+      return;
+    }
+
+    if (req.header('User') !== messageToDelete.from) {
+      res.sendStatus(401)
+      mongoClient.close()
+      return;
+    }
+
+    await messagesCollection.deleteOne({ _id: new ObjectId(id) })
+
+    res.sendStatus(200)
+    mongoClient.close()
+  } catch (error) {
+    res.status(500).send(error)
+    mongoClient.close()
+  }
+});
+
+app.put('/messages/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+
+    await mongoClient.connect()
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const participantsCollection = dbUol.collection("participants")
+    const messagesCollection = dbUol.collection("messages")
+
+
+    const participantsOnline = await participantsCollection.find({}).toArray()
+
+    let participantsList = participantsOnline.map(el => el.name)
+
+    let userMsg = { from: req.header('User'), ...req.body }
+
+    const messagesSchema = Joi.object().keys({
+      from: Joi.string().valid(...participantsList).required(),
+      to: Joi.string().required(),
+      text: Joi.string().required(),
+      type: Joi.string().valid('message', 'private_message').required()
+    });
+
+
+    const validation = messagesSchema.validate(userMsg, { abortEarly: true })
+
+    if (validation.error) {
+      res.status(422).send(validation.error.details)
+      mongoClient.close()
+      return
+    }
+
+    userMsg.from = stripHtml(userMsg.from).result.trim()
+    userMsg.to = stripHtml(userMsg.to).result.trim()
+    userMsg.text = stripHtml(userMsg.text).result.trim()
+    userMsg.type = stripHtml(userMsg.type).result.trim()
+    userMsg.time = dayjs(Date.now()).format('HH:mm:ss')
+
+    const messageToEdit = await messagesCollection.findOne({ _id: new ObjectId(id) })
+
+    if (!messageToEdit) {
+      res.sendStatus(404)
+      mongoClient.close()
+      return;
+    }
+
+    if (req.header('User') !== messageToEdit.from) {
+      res.sendStatus(401)
+      mongoClient.close()
+      return;
+    }
+
+    await messagesCollection.updateOne({
+      _id: messageToEdit._id
+    }, { $set: userMsg })
+
+    res.sendStatus(201)
+
+  } catch {
+    res.sendStatus(500);
+  }
+
+  mongoClient.close()
 
 });
 
@@ -266,9 +368,3 @@ app.post("/status", async (req, res) => {
 
 
 app.listen(5000);
-
-
-
-// TO-DO REVER SEND STATUS DE TODOS! VER PADRÂO QUE O DINA ENSINOU NA AULA HOJE QUINTA_FEIRA
-// VERIFICAR ERRO QUANDO È O PRIMEIRO A ENTRAR NO SERVIDOR
-// UTILIZAR ID PARA PROCURAR O NOME E NÂO MSG! (PERGUNTAR PARA O TUTOR)
