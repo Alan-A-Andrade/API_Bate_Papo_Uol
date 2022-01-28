@@ -13,9 +13,6 @@ const app = express();
 app.use(express.json())
 app.use(cors());
 
-//mongodb://127.0.0.1:27017/?compressors=disabled&gssapiServiceName=mongodb
-
-
 app.get("/hello", (req, res) => {
   res.send("Oi");
 });
@@ -224,4 +221,54 @@ app.get("/messages", async (req, res) => {
 
 });
 
+/*route status */
+
+app.post("/status", async (req, res) => {
+
+  try {
+
+    await mongoClient.connect()
+    const dbUol = mongoClient.db("bate_papo_uol_alan");
+    const participantsCollection = dbUol.collection("participants")
+
+    if (!req.header('User')) {
+      res.sendStatus(400)
+      mongoClient.close()
+      return
+    }
+
+    const user = await participantsCollection.findOne({ name: req.header('User') })
+
+    if (!user) {
+      res.sendStatus(404)
+      mongoClient.close()
+      return
+    }
+
+    let lastStatusUpdate = Date.now()
+
+    await participantsCollection.updateOne({
+      _id: user._id
+    }, { $set: { lastStatus: lastStatusUpdate } })
+
+    res.sendStatus(200)
+    mongoClient.close()
+    return
+
+  } catch {
+    res.sendStatus(500);
+    mongoClient.close()
+    return
+  }
+
+
+});
+
+
 app.listen(5000);
+
+
+
+// TO-DO REVER SEND STATUS DE TODOS! VER PADRÂO QUE O DINA ENSINOU NA AULA HOJE QUINTA_FEIRA
+// VERIFICAR ERRO QUANDO È O PRIMEIRO A ENTRAR NO SERVIDOR
+// UTILIZAR ID PARA PROCURAR O NOME E NÂO MSG! (PERGUNTAR PARA O TUTOR)
