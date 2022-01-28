@@ -75,7 +75,7 @@ app.post("/participants", async (req, res) => {
       name: Joi.string().invalid(...participantsList).required()
     });
 
-    const validation = participantsSchema.validate(newParticipant, { abortEarly: true })
+    const validation = participantsSchema.validate(newParticipant, { abortEarly: false })
 
     if (validation.error) {
       if (validation.error.details[0].type === "any.invalid") {
@@ -156,10 +156,10 @@ app.post("/messages", async (req, res) => {
     });
 
 
-    const validation = messagesSchema.validate(userMsg, { abortEarly: true })
+    const validation = messagesSchema.validate(userMsg, { abortEarly: false })
 
     if (validation.error) {
-      res.status(422).send(validation.error.details)
+      res.status(422).send(validation.error.details.map(err => err.message))
       mongoClient.close()
       return
     }
@@ -281,10 +281,10 @@ app.put('/messages/:id', async (req, res) => {
     });
 
 
-    const validation = messagesSchema.validate(userMsg, { abortEarly: true })
+    const validation = messagesSchema.validate(userMsg, { abortEarly: false })
 
     if (validation.error) {
-      res.status(422).send(validation.error.details)
+      res.status(422).send(validation.error.details.map(err => err.message))
       mongoClient.close()
       return
     }
